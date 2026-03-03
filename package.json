@@ -1,0 +1,9 @@
+{
+  "name": "modscrapper",
+  "version": "1.0.0",
+  "description": "Vercel serverless API to fetch latest app versions from modding sites",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  }
+}
