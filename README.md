@@ -26,7 +26,9 @@ GET /api/version?url=<platinmods search URL>
 GET /api/version?url=https://platinmods.com/search/157784990/?q=BuzzKill&c[title_only]=1&o=date
 ```
 
-### Response
+### Response (JSON)
+
+Add `&format=json` to get a machine-readable response instead:
 
 ```json
 {
@@ -62,7 +64,7 @@ GET /api/version?url=https://platinmods.com/search/157784990/?q=BuzzKill&c[title
 
 | Field | Value |
 |-------|-------|
-| **Source URL** | `https://<your-deployment>/api/version?q=<App Name>&format=html` |
+| **Source URL** | `https://<your-deployment>/api/version?q=<App Name>` |
 | **APK link filter** | *(leave default)* |
 | **Version extraction regex** | `v([\d.]+)\.apk` |
 | **Mark as track-only** | ✅ enabled |

@@ -6,7 +6,7 @@
  * GET parameters:
  *   q      - App name to search for (e.g. "BuzzKill")
  *   url    - Direct Platinmods search URL (skips the search step)
- *   format - "json" (default) | "html"
+ *   format - "html" (default) | "json"
  *            "html" returns an Obtainium-compatible HTML page (see README)
  *
  * Response JSON (default):
@@ -110,9 +110,10 @@ function withDateOrder(url) {
 function buildHtml(appName, results) {
   const links = results
     .map(({ version, thread_url }) => {
-      // Append /vX.Y.Z.apk so the filename carries the version
-      const href = `${thread_url}${version}.apk`;
-      return `  <li><a href="${href}">${appName} ${version}</a></li>`;
+      // Obtainium link: ends in .apk so the default filter picks it up,
+      // version is embedded in the filename for extraction.
+      const apkHref = `${thread_url}${version}.apk`;
+      return `  <li><a href="${apkHref}">${appName} ${version}</a> — <a href="${thread_url}">thread</a></li>`;
     })
     .join('\n');
 
@@ -132,7 +133,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
 
   const { q, url, format } = req.query ?? {};
-  const wantHtml = format === 'html';
+  const wantHtml = format !== 'json';
 
   if (!q && !url) {
     res.setHeader('Content-Type', 'application/json');
