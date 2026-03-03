@@ -52,6 +52,25 @@ GET /api/version?url=https://platinmods.com/search/157784990/?q=BuzzKill&c[title
 | 502 | Platinmods returned an unexpected response |
 | 500 | Internal error |
 
+## Obtainium integration
+
+[Obtainium](https://github.com/ImranR98/Obtainium) can use the `?format=html` variant as an **HTML source** to track when a new version is posted on Platinmods.
+
+> **Track-only** — Platinmods requires authentication to download files, so Obtainium will detect version changes but you will need to download the APK manually.
+
+### Setup
+
+| Field | Value |
+|-------|-------|
+| **Source URL** | `https://<your-deployment>/api/version?q=<App Name>&format=html` |
+| **APK link filter** | *(leave default)* |
+| **Version extraction regex** | `v([\d.]+)\.apk` |
+| **Mark as track-only** | ✅ enabled |
+
+The HTML response contains one link per search result. Each `href` ends with `v<version>.apk` (e.g. `…/v30.11.0.apk`), which Obtainium's default `.apk` filter picks up automatically. The version regex then captures the version number from that filename.
+
+When a new version is posted on Platinmods, the first link in the page changes → Obtainium detects the update and notifies you.
+
 ## How it works
 
 Platinmods uses XenForo, which requires a CSRF-protected form POST to initiate a search. The function performs three requests on each call:

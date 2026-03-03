@@ -4,11 +4,17 @@
  * Returns the latest available version of an app from Platinmods.
  *
  * GET parameters:
- *   q   - App name to search for (e.g. "BuzzKill")
- *   url - Direct Platinmods search URL (skips the search step)
+ *   q      - App name to search for (e.g. "BuzzKill")
+ *   url    - Direct Platinmods search URL (skips the search step)
+ *   format - "json" (default) | "html"
+ *            "html" returns an Obtainium-compatible HTML page (see README)
  *
- * Response JSON:
+ * Response JSON (default):
  *   { version, thread_url, all_results, search_url, source }
+ *
+ * Response HTML (?format=html):
+ *   Minimal HTML page with one <a> per result whose href ends in
+ *   "v{version}.apk", suitable for Obtainium's HTML source.
  */
 
 const PLATINMODS_BASE = 'https://platinmods.com';
@@ -87,14 +93,49 @@ function withDateOrder(url) {
   return url + (url.includes('?') ? '&' : '?') + 'o=date';
 }
 
+/**
+ * Render an Obtainium-compatible HTML page from a results array.
+ *
+ * Each result gets one <a> whose href is the platinmods thread URL with
+ * "/vX.Y.Z.apk" appended as a path suffix.  This gives Obtainium a link
+ * that (a) ends in .apk so the default filter passes it, and (b) contains
+ * the version string in the filename for extraction.
+ *
+ * Obtainium setup:
+ *   - Source URL : https://<your-deployment>/api/version?q=<app>+format=html
+ *   - APK link filter  : (leave default – matches *.apk)
+ *   - Version regex    : v([\d.]+)\.apk
+ *   - Enable "Mark as track-only" (platinmods downloads require auth)
+ */
+function buildHtml(appName, results) {
+  const links = results
+    .map(({ version, thread_url }) => {
+      // Append /vX.Y.Z.apk so the filename carries the version
+      const href = `${thread_url}${version}.apk`;
+      return `  <li><a href="${href}">${appName} ${version}</a></li>`;
+    })
+    .join('\n');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>${appName} – Platinmods version tracker</title></head>
+<body>
+<ul>
+${links}
+</ul>
+</body>
+</html>`;
+}
+
 export default async function handler(req, res) {
   // Allow CORS so a front-end can call this directly
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Content-Type', 'application/json');
 
-  const { q, url } = req.query ?? {};
+  const { q, url, format } = req.query ?? {};
+  const wantHtml = format === 'html';
 
   if (!q && !url) {
+    res.setHeader('Content-Type', 'application/json');
     return res.status(400).json({
       error: 'Provide either ?q=<app name> or ?url=<platinmods search URL>',
     });
@@ -194,12 +235,24 @@ export default async function handler(req, res) {
     const results = parseResults(resultsHtml);
 
     if (results.length === 0) {
+      if (wantHtml) {
+        res.setHeader('Content-Type', 'text/html');
+        return res.status(404).send('<p>No versioned threads found.</p>');
+      }
+      res.setHeader('Content-Type', 'application/json');
       return res.status(404).json({
         error: 'No versioned threads found for this query',
         search_url: resultsUrl,
       });
     }
 
+    // ── Respond ───────────────────────────────────────────────────────────
+    if (wantHtml) {
+      res.setHeader('Content-Type', 'text/html');
+      return res.status(200).send(buildHtml(q || url, results));
+    }
+
+    res.setHeader('Content-Type', 'application/json');
     return res.status(200).json({
       version: results[0].version,
       thread_url: results[0].thread_url,
@@ -209,6 +262,7 @@ export default async function handler(req, res) {
     });
 
   } catch (err) {
+    res.setHeader('Content-Type', 'application/json');
     return res.status(500).json({ error: err.message });
   }
 }
