@@ -25,18 +25,19 @@ const HEADERS = {
 /**
  * Extract a semantic version string from a Platinmods thread URL slug.
  *
- * Thread URLs look like:
- *   /threads/buzzkill-notification-manager-v30-11-0-mod-apk-license-check-remove.281862/
+ * Handles two slug conventions:
+ *   -v30-11-0-mod-apk    →  v30.11.0   (most threads)
+ *   -ver-1-32-8-mod-apk  →  v1.32.8    (some "Ver. X.Y.Z" titles)
  *
- * The version segment starts with 'v' followed by digits/dashes and ends
- * before the first dash-then-letter (description) or a dot (thread ID).
+ * The version segment ends before the first dash-then-letter (description)
+ * or a dot followed by a digit (thread ID).
  */
 function extractVersionFromSlug(url) {
-  // Match -vX-Y-Z or -vX-Y with a lookahead stopping before -word or .id
-  const match = url.match(/-(v\d+(?:-\d+)*)(?=-[a-zA-Z]|\.\d|\/|$)/i);
+  // v(?:er)? matches both "v" and "ver"; -? absorbs the separator dash in "ver-"
+  const match = url.match(/-(v(?:er)?-?)(\d+(?:-\d+)*)(?=-[a-zA-Z]|\.\d|\/|$)/i);
   if (!match) return null;
-  // Convert dashes between version parts to dots: v30-11-0 → v30.11.0
-  return match[1].replace(/-/g, '.');
+  // Always normalise to "vX.Y.Z" regardless of whether slug used "v" or "ver"
+  return 'v' + match[2].replace(/-/g, '.');
 }
 
 /**

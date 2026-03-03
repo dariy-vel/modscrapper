@@ -15,9 +15,9 @@ const HEADERS = {
 };
 
 function extractVersionFromSlug(url) {
-  const match = url.match(/-(v\d+(?:-\d+)*)(?=-[a-zA-Z]|\.\d|\/|$)/i);
+  const match = url.match(/-(v(?:er)?-?)(\d+(?:-\d+)*)(?=-[a-zA-Z]|\.\d|\/|$)/i);
   if (!match) return null;
-  return match[1].replace(/-/g, '.');
+  return 'v' + match[2].replace(/-/g, '.');
 }
 
 function parseCookies(response) {
