@@ -62,17 +62,19 @@ Two source types are supported. The **APKMirror** option is recommended because 
 
 ### Option A — APKMirror source (version + release date)
 
-Obtainium's APKMirror source parser fetches `{url}/feed/` and reads an RSS 2.0 feed. A Vercel rewrite makes this work automatically: adding `/feed` to any app URL returns the RSS feed.
+Obtainium's APKMirror source parser fetches `{url}/feed/` and reads an RSS 2.0 feed. A Vercel rewrite handles this automatically.
+
+The URL **must** match APKMirror's expected path pattern (`/apk/<org>/<app>`), so use the `/apk/` prefix with a placeholder org segment:
 
 | Field | Value |
 |-------|-------|
-| **App source URL** | `https://<your-deployment>/api/<App Name>` |
+| **App source URL** | `https://<your-deployment>/apk/placeholder/<App Name>` |
 | **Override source** | APKMirror |
 | **Mark as track-only** | ✅ enabled |
 
-Example: `https://<your-deployment>/api/BuzzKill`
+Example: `https://<your-deployment>/apk/placeholder/BuzzKill`
 
-Obtainium will fetch `…/api/BuzzKill/feed`, which returns RSS like:
+Obtainium will fetch `…/apk/placeholder/BuzzKill/feed/`, which returns RSS like:
 
 ```xml
 <item>
