@@ -12,6 +12,14 @@
     {
       "source": "/apk/:pkg/:app/feed",
       "destination": "/api/version?q=:app&format=rss"
+    },
+    {
+      "source": "/apk/:pkg/:app/",
+      "destination": "/api/version?q=:app&format=html&author=:pkg"
+    },
+    {
+      "source": "/apk/:pkg/:app",
+      "destination": "/api/version?q=:app&format=html&author=:pkg"
     }
   ]
 }
