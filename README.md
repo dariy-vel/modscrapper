@@ -56,11 +56,36 @@ Add `&format=json` to get a machine-readable response instead:
 
 ## Obtainium integration
 
-[Obtainium](https://github.com/ImranR98/Obtainium) can use the `?format=html` variant as an **HTML source** to track when a new version is posted on Platinmods.
-
 > **Track-only** — Platinmods requires authentication to download files, so Obtainium will detect version changes but you will need to download the APK manually.
 
-### Setup
+Two source types are supported. The **APKMirror** option is recommended because it also surfaces the release date.
+
+### Option A — APKMirror source (version + release date)
+
+Obtainium's APKMirror source parser fetches `{url}/feed/` and reads an RSS 2.0 feed. A Vercel rewrite makes this work automatically: adding `/feed` to any app URL returns the RSS feed.
+
+| Field | Value |
+|-------|-------|
+| **App source URL** | `https://<your-deployment>/api/<App Name>` |
+| **Override source** | APKMirror |
+| **Mark as track-only** | ✅ enabled |
+
+Example: `https://<your-deployment>/api/BuzzKill`
+
+Obtainium will fetch `…/api/BuzzKill/feed`, which returns RSS like:
+
+```xml
+<item>
+  <title>BuzzKill 30.11.0 by Platinmods</title>
+  <pubDate>Thu, 06 Feb 2026 03:04:00 GMT</pubDate>
+</item>
+```
+
+Version is extracted from the title (everything from the first digit to the last ` by `). Release date comes from the thread's post timestamp.
+
+> **Note:** The APKMirror override may reject non-apkmirror.com URLs depending on your Obtainium version. If it does, use Option B.
+
+### Option B — HTML source (version only)
 
 | Field | Value |
 |-------|-------|
@@ -69,9 +94,7 @@ Add `&format=json` to get a machine-readable response instead:
 | **Version extraction regex** | `v([\d.]+)\.apk` |
 | **Mark as track-only** | ✅ enabled |
 
-The HTML response contains one link per search result. Each `href` ends with `v<version>.apk` (e.g. `…/v30.11.0.apk`), which Obtainium's default `.apk` filter picks up automatically. The version regex then captures the version number from that filename.
-
-When a new version is posted on Platinmods, the first link in the page changes → Obtainium detects the update and notifies you.
+Each result link ends with `v<version>.apk` (e.g. `…/v30.11.0.apk`). Obtainium's default `.apk` filter picks it up and the version regex captures the version number.
 
 ## How it works
 

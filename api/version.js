@@ -6,15 +6,20 @@
  * GET parameters:
  *   q      - App name to search for (e.g. "BuzzKill")
  *   url    - Direct Platinmods search URL (skips the search step)
- *   format - "html" (default) | "json"
- *            "html" returns an Obtainium-compatible HTML page (see README)
+ *   format - "html" (default) | "json" | "rss"
+ *            "html" returns an Obtainium HTML source page (see README)
+ *            "rss"  returns an APKMirror-compatible RSS feed (see README)
  *
- * Response JSON (default):
- *   { version, thread_url, all_results, search_url, source }
- *
- * Response HTML (?format=html):
+ * Response HTML (default):
  *   Minimal HTML page with one <a> per result whose href ends in
  *   "v{version}.apk", suitable for Obtainium's HTML source.
+ *
+ * Response RSS (?format=rss):
+ *   RSS 2.0 feed with one <item> per result; title format matches what
+ *   Obtainium's APKMirror source parser expects: "AppName X.Y.Z by Platinmods"
+ *
+ * Response JSON (?format=json):
+ *   { version, thread_url, all_results, search_url, source }
  */
 
 const PLATINMODS_BASE = 'https://platinmods.com';
@@ -63,8 +68,11 @@ function parseCookies(response) {
 }
 
 /**
- * Parse unique thread links from a Platinmods search-results HTML page
- * and extract version numbers from each slug.
+ * Parse unique thread links + post dates from a Platinmods search-results page.
+ *
+ * Dates come from <time class="u-dt" datetime="ISO8601"> elements.
+ * XenForo emits exactly one such element per search result row, in the same
+ * document order as the thread links, so we zip them together by position.
  */
 function parseResults(html) {
   const seen = new Set();
@@ -76,9 +84,18 @@ function parseResults(html) {
 
     const version = extractVersionFromSlug(href);
     if (version) {
-      results.push({ version, thread_url: `${PLATINMODS_BASE}${href}` });
+      results.push({ version, thread_url: `${PLATINMODS_BASE}${href}`, pubDate: null });
     }
   }
+
+  // Extract ISO 8601 dates from XenForo's <time class="u-dt"> elements
+  const dates = [
+    ...html.matchAll(/<time\b[^>]*class="u-dt"[^>]*datetime="([^"]+)"/gi),
+  ].map((m) => m[1]);
+
+  results.forEach((r, i) => {
+    if (dates[i]) r.pubDate = dates[i];
+  });
 
   return results;
 }
@@ -97,21 +114,13 @@ function withDateOrder(url) {
  * Render an Obtainium-compatible HTML page from a results array.
  *
  * Each result gets one <a> whose href is the platinmods thread URL with
- * "/vX.Y.Z.apk" appended as a path suffix.  This gives Obtainium a link
+ * "vX.Y.Z.apk" appended as a path suffix.  This gives Obtainium a link
  * that (a) ends in .apk so the default filter passes it, and (b) contains
  * the version string in the filename for extraction.
- *
- * Obtainium setup:
- *   - Source URL : https://<your-deployment>/api/version?q=<app>+format=html
- *   - APK link filter  : (leave default – matches *.apk)
- *   - Version regex    : v([\d.]+)\.apk
- *   - Enable "Mark as track-only" (platinmods downloads require auth)
  */
 function buildHtml(appName, results) {
   const links = results
     .map(({ version, thread_url }) => {
-      // Obtainium link: ends in .apk so the default filter picks it up,
-      // version is embedded in the filename for extraction.
       const apkHref = `${thread_url}${version}.apk`;
       return `  <li><a href="${apkHref}">${appName} ${version}</a> — <a href="${thread_url}">thread</a></li>`;
     })
@@ -128,12 +137,55 @@ ${links}
 </html>`;
 }
 
+/**
+ * Render an APKMirror-compatible RSS 2.0 feed.
+ *
+ * Obtainium's APKMirror source parser:
+ *   1. Fetches {url}/feed/
+ *   2. Selects all <item> elements
+ *   3. Extracts version: substring from first digit to last " by " in <title>
+ *   4. Extracts date from <pubDate>
+ *
+ * Title format: "AppName X.Y.Z by Platinmods"
+ *   – version has no "v" prefix so the first digit is unambiguous
+ *   – works as long as the app name itself contains no digits
+ *
+ * The Vercel rewrite  /api/:app/feed  →  /api/version?q=:app&format=rss
+ * makes this endpoint addressable at the URL APKMirror expects.
+ */
+function buildRss(appName, results, selfUrl) {
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const items = results
+    .map(({ version, thread_url, pubDate }) => {
+      // Strip leading "v" so the first character is a digit
+      const ver = version.replace(/^v/, '');
+      const title = esc(`${appName} ${ver} by Platinmods`);
+      const pub = pubDate ? new Date(pubDate).toUTCString() : new Date().toUTCString();
+      return `    <item>
+      <title>${title}</title>
+      <link>${esc(thread_url)}</link>
+      <pubDate>${pub}</pubDate>
+    </item>`;
+    })
+    .join('\n');
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>${esc(appName)} – Platinmods</title>
+    <link>${esc(selfUrl)}</link>
+    <description>Latest ${esc(appName)} versions on Platinmods</description>
+${items}
+  </channel>
+</rss>`;
+}
+
 export default async function handler(req, res) {
   // Allow CORS so a front-end can call this directly
   res.setHeader('Access-Control-Allow-Origin', '*');
 
-  const { q, url, format } = req.query ?? {};
-  const wantHtml = format !== 'json';
+  const { q, url, format = 'html' } = req.query ?? {};
 
   if (!q && !url) {
     res.setHeader('Content-Type', 'application/json');
@@ -215,7 +267,7 @@ export default async function handler(req, res) {
       }
 
       // Step 3 – re-fetch the same search with date ordering
-      const rawSearchUrl = searchResp.url; // e.g. /search/12345/?q=...&o=relevance
+      const rawSearchUrl = searchResp.url;
       const dateSearchUrl = withDateOrder(rawSearchUrl);
 
       const dateResp = await fetch(dateSearchUrl, {
@@ -236,31 +288,40 @@ export default async function handler(req, res) {
     const results = parseResults(resultsHtml);
 
     if (results.length === 0) {
-      if (wantHtml) {
-        res.setHeader('Content-Type', 'text/html');
-        return res.status(404).send('<p>No versioned threads found.</p>');
+      if (format === 'json') {
+        res.setHeader('Content-Type', 'application/json');
+        return res.status(404).json({
+          error: 'No versioned threads found for this query',
+          search_url: resultsUrl,
+        });
       }
-      res.setHeader('Content-Type', 'application/json');
-      return res.status(404).json({
-        error: 'No versioned threads found for this query',
-        search_url: resultsUrl,
-      });
+      res.setHeader('Content-Type', format === 'rss' ? 'application/rss+xml' : 'text/html');
+      return res.status(404).send('<p>No versioned threads found.</p>');
     }
 
     // ── Respond ───────────────────────────────────────────────────────────
-    if (wantHtml) {
-      res.setHeader('Content-Type', 'text/html');
-      return res.status(200).send(buildHtml(q || url, results));
+    const appName = q || url;
+
+    if (format === 'rss') {
+      const selfUrl = `${PLATINMODS_BASE}/search/?q=${encodeURIComponent(q || url)}`;
+      res.setHeader('Content-Type', 'application/rss+xml; charset=utf-8');
+      return res.status(200).send(buildRss(appName, results, selfUrl));
     }
 
-    res.setHeader('Content-Type', 'application/json');
-    return res.status(200).json({
-      version: results[0].version,
-      thread_url: results[0].thread_url,
-      all_results: results,
-      search_url: resultsUrl,
-      source: 'platinmods',
-    });
+    if (format === 'json') {
+      res.setHeader('Content-Type', 'application/json');
+      return res.status(200).json({
+        version: results[0].version,
+        thread_url: results[0].thread_url,
+        all_results: results,
+        search_url: resultsUrl,
+        source: 'platinmods',
+      });
+    }
+
+    // default: html
+    res.setHeader('Content-Type', 'text/html');
+    return res.status(200).send(buildHtml(appName, results));
 
   } catch (err) {
     res.setHeader('Content-Type', 'application/json');
