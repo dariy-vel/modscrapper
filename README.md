@@ -14,6 +14,16 @@ GET /api/version?q=<app name>
 GET /api/version?q=BuzzKill
 ```
 
+### Search by package name
+
+Pass an Android package name instead of an app title. The API resolves the real app name from Google Play automatically, searches Platinmods with it, and filters results to that exact app (excluding sibling variants such as "… Pro").
+
+```
+GET /api/version?q=io.appground.blek
+```
+
+Fails with `502` if the package is not found on Google Play.
+
 ### Use a Platinmods URL directly
 
 Pass a thread URL to skip scraping entirely — the version is read straight from the slug, no HTTP requests:
@@ -51,7 +61,7 @@ GET /api/version?url=https://platinmods.com/search/157784990/?q=BuzzKill&c[title
 }
 ```
 
-`version` is the top result from a date-ordered search, so it reflects the most recently posted thread — typically the latest available mod version.
+`version` is always the highest version found — results are sorted by semantic version number, not post date, so a recently-bumped old thread cannot displace a newer release.
 
 ### Error responses
 
@@ -59,7 +69,7 @@ GET /api/version?url=https://platinmods.com/search/157784990/?q=BuzzKill&c[title
 |--------|---------|
 | 400 | Missing `q` or `url` parameter |
 | 404 | No versioned threads found for the query |
-| 502 | Platinmods returned an unexpected response |
+| 502 | Platinmods returned an unexpected response, or package name could not be resolved via Google Play |
 | 500 | Internal error |
 
 ---
@@ -79,11 +89,13 @@ The `/apk/<Author>/<AppName>` URL structure is designed to satisfy Obtainium's A
 
 | Field | Value |
 |-------|-------|
-| **App source URL** | `https://<your-deployment>/apk/Platinmods/<App Name>` |
+| **App source URL** | `https://<your-deployment>/apk/Platinmods/<App Name or package ID>` |
 | **Override source** | APKMirror |
 | **Mark as track-only** | ✅ enabled |
 
-Example: `https://<your-deployment>/apk/Platinmods/BuzzKill`
+Examples:
+- `https://<your-deployment>/apk/Platinmods/BuzzKill` — by name
+- `https://<your-deployment>/apk/Platinmods/io.appground.blek` — by package ID (resolved via Google Play; also filters out Pro/sibling variants automatically)
 
 - Obtainium shows **Platinmods** as the developer name (from the URL segment — you can use any label you like)
 - Obtainium fetches `…/apk/Platinmods/BuzzKill/feed/`, which returns RSS:
@@ -128,6 +140,12 @@ Each row links to both the synthetic `.apk` URL (for Obtainium) and the real Pla
 
 ## How it works
 
+### Package name resolution (when `?q=` is a package ID)
+
+If `?q=` looks like a package name (e.g. `io.appground.blek`), the API first fetches the Google Play Store page for that package and extracts the real app title from `og:title`. The resolved title is used for the Platinmods search. A **per-app filter** then compares the normalised app-name portion of each result's URL slug against the resolved title, dropping threads for sibling apps (e.g. a "Pro" variant whose slug contains `…-pro-`) before any version sorting occurs.
+
+### Platinmods scraping (when `?q=` is an app name)
+
 Platinmods uses XenForo, which requires a CSRF-protected form POST to initiate a search. The function performs three requests on each `?q=` call:
 
 1. `GET /search/?type=post` — loads the search form to obtain a session cookie and `_xfToken` CSRF token
@@ -136,7 +154,11 @@ Platinmods uses XenForo, which requires a CSRF-protected form POST to initiate a
 
 When `?url=` points at a thread URL (`/threads/…`), steps 1–3 are skipped entirely — the version is read directly from the URL slug.
 
-Version strings are parsed from thread URL slugs: `v30-11-0` → `v30.11.0`.
+### Version selection
+
+After scraping, all results are **sorted by semantic version number descending**, so the highest version is always first regardless of which thread was most recently posted or updated. This prevents a bumped old thread from being mistakenly reported as the latest release.
+
+Version strings are parsed from thread URL slugs: `v30-11-0` → `v30.11.0`, `ver-6-19-0` → `v6.19.0`.
 
 ---
 
