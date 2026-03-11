@@ -121,56 +121,11 @@ function compareVersionsDesc(a, b) {
 
 /**
  * Return true if s looks like an Android package name (e.g. "io.appground.blek").
- * Must contain at least one dot and only valid identifier characters.
+ * Used to switch from title-only to full-text search so Platinmods matches
+ * the Play Store URL in the thread body rather than the thread title.
  */
 function isPackageName(s) {
   return /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)+$/i.test(s);
-}
-
-/**
- * Normalise a string for app-name comparison:
- * lower-case, collapse non-alphanumeric runs to a single space, trim.
- */
-function normaliseName(s) {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-/**
- * Return the normalised app-name portion of a Platinmods thread URL —
- * the slug segment before the version marker, with hyphens converted to spaces.
- * e.g. ".../bluetooth-keyboard-mouse-pro-ver-6-19-0-mod-apk..."
- *       → "bluetooth keyboard mouse pro"
- */
-function slugAppPart(threadUrl) {
-  const m = threadUrl.match(/\/threads\/([^/?#]+)/);
-  if (!m) return '';
-  return normaliseName(m[1].replace(/-(v(?:er)?-?\d+.*)$/, '').replace(/-/g, ' '));
-}
-
-/**
- * Fetch the Google Play Store page for packageId and return the app title.
- * Tries og:title first, falls back to <title>.
- * Returns null on any failure so the caller decides how to handle it.
- */
-async function resolvePackageName(packageId) {
-  try {
-    const resp = await fetch(
-      `https://play.google.com/store/apps/details?id=${encodeURIComponent(packageId)}&hl=en`,
-      { headers: HEADERS }
-    );
-    if (!resp.ok) return null;
-    const html = await resp.text();
-    // og:title is most reliable — present in both attribute orders
-    let m =
-      html.match(/property="og:title"\s+content="([^"]+?)(?:\s*[-–]\s*Apps on Google Play)?"/i) ??
-      html.match(/content="([^"]+?)(?:\s*[-–]\s*Apps on Google Play)?"\s+property="og:title"/i);
-    if (m) return m[1].trim();
-    // <title> fallback: "App Name - Apps on Google Play"
-    m = html.match(/<title>([^<]+?)\s*[-–]\s*Apps on Google Play/i);
-    return m ? m[1].trim() : null;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -313,28 +268,6 @@ export default async function handler(req, res) {
     let results;
     let resultsUrl;
 
-    // ── Package-name → app-name resolution ────────────────────────────────────
-    //
-    // If ?q= looks like "io.appground.blek", Platinmods title-only search will
-    // return nothing because thread titles never contain package IDs.
-    // Resolve the real app name from Google Play first, then use it as the
-    // search term and remember the package ID for per-app result filtering.
-    let packageId = null;   // set when q was a package name
-    let searchTerm = q;     // what we actually pass to Platinmods
-
-    if (q && isPackageName(q)) {
-      packageId = q;
-      const resolved = await resolvePackageName(packageId);
-      if (!resolved) {
-        res.setHeader('Content-Type', 'application/json');
-        return res.status(502).json({
-          error: `Could not resolve package "${packageId}" via Google Play. ` +
-                 `Try ?q=<app name> instead (e.g. ?q=Bluetooth+Keyboard+%26+Mouse).`,
-        });
-      }
-      searchTerm = resolved;
-    }
-
     // ── Branch A: thread URL — extract from slug, zero HTTP requests ──────────
     //
     // If the caller supplies a direct thread URL such as
@@ -386,11 +319,11 @@ export default async function handler(req, res) {
       }
 
       // Step 2 – POST the search; fetch follows the redirect automatically
-      const body = new URLSearchParams({
-        keywords: searchTerm,
-        'c[title_only]': '1',
-        _xfToken: tokenMatch[1],
-      });
+      // Package-name queries use full-text search (no title_only) so Platinmods
+      // matches the Play Store URL in the thread body, which contains the package ID.
+      // App-name queries use title_only to avoid unrelated posts mentioning the name.
+      const body = new URLSearchParams({ keywords: q, _xfToken: tokenMatch[1] });
+      if (!isPackageName(q)) body.set('c[title_only]', '1');
 
       const searchResp = await fetch(
         `${PLATINMODS_BASE}/search/search`,
@@ -423,25 +356,6 @@ export default async function handler(req, res) {
       resultsUrl = dateResp.url;
     }
 
-    // ── Per-app filter ────────────────────────────────────────────────────────
-    //
-    // When the query was a package name we know the exact app title (searchTerm)
-    // and can exclude threads for sibling apps (e.g. "… Pro") whose slug
-    // app-name portion doesn't exactly match the resolved title.
-    //
-    // The normalised slug app-part is compared to the normalised resolved name:
-    //   "bluetooth-keyboard-mouse-pro-ver-6-19-0-..." → "bluetooth keyboard mouse pro"
-    //   resolved: "Bluetooth Keyboard & Mouse"        → "bluetooth keyboard mouse"
-    //   → excluded ✓
-    //
-    // If the filter removes everything (unlikely) we fall back to all results
-    // rather than returning a confusing empty response.
-    if (packageId && searchTerm) {
-      const target = normaliseName(searchTerm);
-      const filtered = results.filter((r) => slugAppPart(r.thread_url) === target);
-      if (filtered.length > 0) results = filtered;
-    }
-
     // Sort by version descending so the highest version is always first,
     // regardless of which thread was posted/updated most recently.
     results.sort(compareVersionsDesc);
@@ -460,9 +374,14 @@ export default async function handler(req, res) {
     }
 
     // ── Derive app name ───────────────────────────────────────────────────────
-    // searchTerm holds the resolved human title when q was a package name,
-    // otherwise it equals q; falls back to URL-derived name or generic 'App'.
-    const appName = searchTerm ?? nameFromUrl(url) ?? 'App';
+    // When q is a package name, read the human title from the top result's slug
+    // (e.g. "bluetooth-keyboard-mouse-ver-..." → "Bluetooth Keyboard Mouse").
+    // Otherwise use q as-is, or derive from the URL, or fall back to 'App'.
+    const appName =
+      (q && isPackageName(q) ? nameFromUrl(results[0].thread_url) : null)
+      ?? q
+      ?? nameFromUrl(url)
+      ?? 'App';
 
     // ── Respond ───────────────────────────────────────────────────────────────
     if (format === 'rss') {

@@ -16,13 +16,11 @@ GET /api/version?q=BuzzKill
 
 ### Search by package name
 
-Pass an Android package name instead of an app title. The API resolves the real app name from Google Play automatically, searches Platinmods with it, and filters results to that exact app (excluding sibling variants such as "… Pro").
+Pass an Android package name instead of an app title. The API runs a full-text search on Platinmods (rather than title-only), which matches threads whose body contains the Google Play URL for that package — each Platinmods thread includes a Play Store link, so only threads for that exact app are returned.
 
 ```
 GET /api/version?q=io.appground.blek
 ```
-
-Fails with `502` if the package is not found on Google Play.
 
 ### Use a Platinmods URL directly
 
@@ -69,7 +67,7 @@ GET /api/version?url=https://platinmods.com/search/157784990/?q=BuzzKill&c[title
 |--------|---------|
 | 400 | Missing `q` or `url` parameter |
 | 404 | No versioned threads found for the query |
-| 502 | Platinmods returned an unexpected response, or package name could not be resolved via Google Play |
+| 502 | Platinmods returned an unexpected response |
 | 500 | Internal error |
 
 ---
@@ -95,7 +93,7 @@ The `/apk/<Author>/<AppName>` URL structure is designed to satisfy Obtainium's A
 
 Examples:
 - `https://<your-deployment>/apk/Platinmods/BuzzKill` — by name
-- `https://<your-deployment>/apk/Platinmods/io.appground.blek` — by package ID (resolved via Google Play; also filters out Pro/sibling variants automatically)
+- `https://<your-deployment>/apk/Platinmods/io.appground.blek` — by package ID (full-text search; sibling apps with different package IDs are excluded automatically)
 
 - Obtainium shows **Platinmods** as the developer name (from the URL segment — you can use any label you like)
 - Obtainium fetches `…/apk/Platinmods/BuzzKill/feed/`, which returns RSS:
@@ -140,9 +138,9 @@ Each row links to both the synthetic `.apk` URL (for Obtainium) and the real Pla
 
 ## How it works
 
-### Package name resolution (when `?q=` is a package ID)
+### Package name queries (when `?q=` is a package ID)
 
-If `?q=` looks like a package name (e.g. `io.appground.blek`), the API first fetches the Google Play Store page for that package and extracts the real app title from `og:title`. The resolved title is used for the Platinmods search. A **per-app filter** then compares the normalised app-name portion of each result's URL slug against the resolved title, dropping threads for sibling apps (e.g. a "Pro" variant whose slug contains `…-pro-`) before any version sorting occurs.
+If `?q=` looks like a package name (e.g. `io.appground.blek`), the API switches to a **full-text search** on Platinmods instead of the default title-only search. Every Platinmods thread includes the app's Google Play URL in the post body, which contains the package ID — so Platinmods' full-text index returns only threads for that exact package, automatically excluding sibling apps (e.g. the "Pro" variant with a different package ID). No external requests are made. The app's display name is derived from the first result's thread URL slug.
 
 ### Platinmods scraping (when `?q=` is an app name)
 
